@@ -1,0 +1,459 @@
+---
+title: "Bayesian Difference-in-Differences<br>for Multiple Time Periods"
+subtitle: BBS 2023/24
+format: 
+  clean-revealjs:
+    fig-width: 8
+    fig-height: 6
+author:
+  - name: Daniel Winkler
+    orcid: 0000-0002-4644-7647
+    email: dwinkler@wu.ac.at
+    affiliations: WU-Vienna 
+date: 2024-01-19
+bibliography: references.bib
+output-file: index.html
+---
+
+# Motivation: Difference-in-Differences
+
+## Basic Setup
+
+- Two groups
+  - Countries
+  - Companies
+  - Individuals
+  - etc.
+- Two periods
+- Group $g=2$ receives treatment between period $1$ and $2$
+- Group $g=\infty$ never receives the treatment (at least in the observation period)
+- No randomization but: "Quasi-Experiment", "Natural Experiment"
+
+. . .
+
+- **Goal**: identification of a _causal average treatment effect on the treated_ (ATT)
+- **Core Assumption**: parallel trends
+
+## Basic Setup
+
+```{r}
+y_j <- c(0.5, 1, 1.8)
+y_j_counter <- c(0.5, 1, 1.5)
+y_k <- c(0.2, 0.7, 1.2)
+x <- c(1,2,3)
+plot(
+    x, y_k, 
+    type = "l", 
+    ylim = c(0, 2),
+    xaxt = "n", yaxt = "n",
+    ylab = "Y", xlab = "Period", 
+    bty= "n"
+    )
+axis(side=2, labels = FALSE, at = NULL)
+axis(side=1, at=c(1,3), labels=c("1",  "2"))
+lines(x, y_j)
+lines(x[2:3], y_j_counter[2:3], lty = 2, col = "red")
+lines(c(3, 3), c(1.5, 1.8), col = "darkgreen")
+abline(v = 2, lty = 4, col = "gray30")
+text(
+    x = 1.5, y = 0.6, 
+    labels = "Parallel pre-treatment", 
+    cex=1.5, srt = 17
+    )
+text(
+    x = 2.2, y = 1.7, 
+    labels = "Treatment",
+    cex=1.5, col = "gray30"
+    )
+text(
+    x = 2.5, y = 1.3, 
+    labels = "Counterfactual",
+    col = "red", srt = 17
+    )
+text(
+    x = 2.9, y = 1.6,
+    labels = "+Effect",
+    col = "darkgreen"
+    )
+grid()
+```
+
+## Treatment effect
+
+- $Y_{i,t}$ ... outcome of unit $i$ at time $t$
+
+
+### Potential outcomes [@rubinCausalInferenceUsing2005]
+
+:::{.incremental}
+- $Y_{i,t}(0)$ ... $Y_{i,t}$ given $i$ is **not** treated at $t$
+- $Y_{i,t}(1)$ ... $Y_{i,t}$ give $i$ is treated at $t$
+- Observed: $Y_{i,t} = \mathbb{1}(treated_{i,t}) Y_{i,t}(1) + \left[1 - \mathbb{1}(treated_{i,t})\right] Y_{i,t}(0)$
+- Individual treatment effect: $\tau_{i,t} = Y_{i,t}(1) - Y_{i,t}(0)$
+:::
+
+
+## Treatment effect
+
+- $Y_{i,t}$ ... outcome of unit $i$ at time $t$
+
+
+### Potential outcomes [@rubinCausalInferenceUsing2005]
+
+- $Y_{i,t}(0)$ ... $Y_{i,t}$ given $i$ is not treated at $t$
+- $Y_{i,t}(1)$ ... $Y_{i,t}$ give $i$ is treated at $t$
+- Observed: $Y_{i,t} = \mathbb{1}(treated_{i,t}) Y_{i,t}(1) + \left[1 - \mathbb{1}(treated_{i,t})\right] Y_{i,t}(0)$
+- Individual treatment effect: $\tau_{i,t} = Y_{i,t}(1) - Y_{i,t}(0)$
+
+| Group   | t = 1 | t = 2 |
+| :---: | :---: | :---: |
+| $g = 2$ | $Y_{i,1}(0)$ | $Y_{i, 2}(1)$ |
+| $g = \infty$ | $Y_{j,1}(0)$ | $Y_{j, 2}(0)$ |
+
+## Average Treatment Effect on the Treated ($\tau_{g=2}$)
+
+- $\bar Y_{g=k, t}$... average outcome of group $k$ at time $t$
+- $\delta_{g=\cdot}$... trend of the outcome for $g = \cdot$ 
+- $\delta_{g=\cdot} = \delta$ for $g = 2$ and $g = \infty$ under parallel trends
+
+. . .
+
+$$
+\begin{aligned}
+\bar Y_{g=2, 2} - \bar Y_{g=2, 1} &= \delta_{g=2} + \tau_{g=2} \\
+\bar Y_{g=2, 2} - \bar Y_{g=2, 1} &=  \bar Y_{g=\infty, 2} - \bar Y_{g=\infty, 1} + \tau_{g=2} \\
+\left[\bar Y_{g=2, 2} - \bar Y_{g=2, 1}\right] - \left[\bar Y_{g=\infty, 2} - \bar Y_{g=\infty, 1}\right] &= \tau_{g=2}
+\end{aligned}
+$$
+
+## Introductory example
+```{r}
+set.seed(1)
+n_obs <- 1000
+units <- rep(1:(n_obs/2), each = 2)
+unit_fe <- runif(n_obs/2, 0, 20)
+period <- rep(c(0,1), n_obs/2)
+period_fe <- rep(c(20, 10), n_obs/2)
+treatment <- rbinom(n_obs/2, 1, 0.5)
+y <- 5 * treatment[units] * period + # tau = 5
+    period_fe + # time fixed effect
+    unit_fe[units] - # unit fixed effect
+    15 * treatment[units] + # constant diff treated/untreated
+    rnorm(n_obs)
+data <- data.frame(
+    y = y, 
+    treated = treatment[units], 
+    period = period, 
+    unit = as.factor(units))
+y_j <- aggregate(y ~ period, data[data$treated == 1, ], mean)$y
+y_k <- aggregate(y ~ period, data[data$treated == 0, ], mean)$y
+delta_y_k <- diff(y_k)
+y_k <- c(
+    y_k[1],
+    y_k[1] + delta_y_k/2,
+    y_k[1] + delta_y_k)
+y_j <- c(
+    y_j[1],
+    y_j[1] + delta_y_k/2, # assumed
+    y_j[2])
+y_j_counter <- c(
+    y_j[1], 
+    y_j[1] + delta_y_k/2,
+    y_j[1] + delta_y_k) # assumed
+boxplot(
+    y ~ 
+    factor(
+        period, levels = c(0,1),
+        labels = c("t: 1","t: 2")
+        ) +
+    factor(
+        treated, levels = c(0,1), 
+        labels = c("D", "A")
+        ), 
+    xlab = "", ylab = "Y",
+    frame.plot = F,
+    col = "white", sep = " in ",
+    main = "Household income",
+    data)
+```
+
+## Introductory example
+
+```{r}
+plot(
+    x, y_k, 
+    type = "l", 
+    ylim = c(0, 35),
+    xaxt = "n", #yaxt = "n",
+    ylab = "Avg. availabe household income", xlab = "Period", 
+    bty= "n"
+    )
+axis(side=1, at=c(1,3), labels=c("1",  "2"))
+lines(x, y_j)
+lines(x[2:3], y_j_counter[2:3], lty = 2, col = "red")
+lines(c(3, 3), c(y_j[3], y_j_counter[3]), col = "darkgreen")
+abline(v = 2, lty = 4, col = "gray30")
+text(x = 1.1, y = 31, labels = "D", cex=1.5)
+text(x = 1.1, y = 16, labels = "A", cex=1.5)
+text(
+    x = 1.5, y = 20, 
+    labels = "Parallel pre-treatment", 
+    cex=1.5, srt = -10
+    )
+text(
+    x = 2.25, y = 28, 
+    labels = "\"Klimabonus\"",
+    cex=1.5, col = "gray30"
+    )
+text(
+    x = 2.5, y = 6.8, 
+    labels = "Counterfactual",
+    col = "red", srt = -10
+    )
+text(
+    x = 2.90, y = 7.8,
+    labels = "+Effect",
+    col = "darkgreen"
+    )
+grid()
+```
+
+## Canonical estimation
+
+### Two-Way Fixed Effects
+
+$$
+\begin{aligned}
+y_{i, t} &= \tau_{did}\ \mathbb{1}(\text{treated}_{i, t}) + \gamma_t + \alpha_i + \epsilon_{i,t} \\
+\mathbb{1}(\text{treated}_{i,t}) &\equiv \mathbb{1}(i \in \text{A}) \times \mathbb{1}(t = 2)
+\end{aligned}
+$$
+
+### "Dummy" Model
+
+$$
+y_{i, t} = \tau_{did} \mathbb{1}(\text{treated}_{i,t}) + \beta_1 \mathbb{1}(i \in \text{A}) + \beta_2 \mathbb{1}(t = 2) + \alpha + \varepsilon_{i,t}
+$$
+
+Typically $\sigma_{\epsilon_{i,t}} < \sigma_{\varepsilon_{i,t}}$
+
+## Extension to Multiple Time Periods
+
+```{r}
+did_data_staggered <- data.table::fread("https://raw.githubusercontent.com/WU-RDS/RMA2022/main/data/did_data_staggered.csv")
+did_data_staggered$song_id <- as.character(did_data_staggered$song_id)
+did_data_staggered$week <- as.Date(did_data_staggered$week)
+did_data_staggered$week_num <- as.numeric(
+    factor(
+        did_data_staggered$week, 
+        levels = sort(unique(did_data_staggered$week)), 
+        labels = 1:length(unique(did_data_staggered$week))))
+# data preparation
+treated_ids <- unique(did_data_staggered[did_data_staggered$treated == 1, ]$song_id)
+untreated_ids <- unique(did_data_staggered[did_data_staggered$treated == 0, ]$song_id)
+
+library(panelView)
+# inspect data
+panelview(
+    streams ~ treated_post, 
+    data = did_data_staggered[
+        did_data_staggered$song_id %in% c(
+            sample(treated_ids,5), 
+            sample(untreated_ids, 3)
+            ) &
+        did_data_staggered$week_num > 10 & 
+        did_data_staggered$week_num <= 30
+    , ], 
+    index = c("song_id", "week"), 
+    ylab = "group",
+    pre.post = TRUE,
+    by.timing = TRUE,
+    theme.bw = TRUE,
+    axis.adjust = TRUE) 
+```
+
+ 
+## Two-Way Fixed Effects?
+
+$$
+y_{i, t} = \tau_{did}\ \mathbb{1}(\text{treated}_{i, t}) + \gamma_t + \alpha_i + \epsilon_{i,t} 
+$$
+
+- Ok **IF** 
+  $$
+  \tau_{g, t} = \tau \text{ for all }g \text{ and } t
+  $$
+
+- Otherwise: estimate separate $\tau_{g, t}$ for all $g$ and $t$ using only not (yet) treated units as controls
+
+## Intuition
+
+![@goodman-baconDifferenceindifferencesVariationTreatment2021c](gb_decomp.png)
+
+## Existing Extensions
+
+- Existing methods for multiple time periods [e.g., @callawayDifferenceinDifferencesMultipleTime2021a] work well if the number of treated units in each group $g$ is "large" (>5)
+- Focus on selecting "control group" correctly
+  - Loop over groups and times and select not (yet) treated as controls [@callawayDifferenceinDifferencesMultipleTime2021a]
+  - Estimate large matrix of indicators [@sunEstimatingDynamicTreatment2021a]
+- Result: **Group Time Average Treatment Effect** $\tau_{g,t}$
+
+. . . 
+
+Survey in the Department for Marketing:
+
+Out of 6 ongoing research projects using diff-in-diff, 5 have at least one $g$ of size $\leq2$
+
+## Research Problem Setup
+
+:::{.incremental}
+- Estimate potentially time varying treatment effects $\tau_{g,t}$
+  - Estimate whether they are $0$
+  - Estimate whether they are time varying
+- For small groups $|g| \leq 2$
+- Show that prior to treatment trends are parallel
+  - Essentially: $\tau_{g,t} = 0$ for all $t < g$
+  - Under parallel trends: $\bar Y_{g=2, 2} - \bar Y_{g=2, 1} = \delta + \tau_{g=2}$ but $\bar Y_{g=3, 2} - \bar Y_{g=3, 1} = \delta = \bar Y_{g=\infty, 2} - \bar Y_{g=\infty, 1}$
+  -  $\left[\bar Y_{g=3, 2} - \bar Y_{g=3, 1}\right] - \left[\bar Y_{g=\infty, 2} - \bar Y_{g=\infty, 1} \right] \neq 0  \Leftrightarrow \delta_{g=3} \neq \delta_{g=\infty}$
+
+- Correct parameters for (hypothesized) post-treatment trend violations $\Delta_{g} = \delta_{g=t} - \delta_{g=\infty}$
+  - E.g., based on pre-treatment estimate
+:::
+
+# This sounds a bit Bayesian to me...
+
+## Idea
+
+**For each group $g$ estimate two models:**
+
+- Pre-treatment model to gain confidence in parallel trends $\Delta_{g} = 0$
+- Post-treatment model to estimate treatment effects $\tau_{g,t}$
+
+**General setup**
+
+- Use time-varying parameters
+  - Assumption: $\Delta_{g} \& \tau_{g}$ evolve smoothly
+  - "A treatment effect today makes a similar effect likely tomorrow."
+- Poentially correct $\tau_{g,t}$ using the estimate of $\Delta_g$
+
+## Estimation
+
+- Gaussian State Space model [@cadonnaTripleGammaMdash2020]
+  - Random walk evolution of parameters
+
+
+$$
+\begin{aligned}
+\beta_{g,t} &= \beta_{g,t-1} + w_{g,t}, \quad w_{g,t} \sim N_4(\mathbf{0}, \mathbf{Q_{g}}) \\
+y_{g,t} &= X_{g,t} \beta_{g,t} + \epsilon_{g,t}, \quad \epsilon_{g,t} \sim N_p(\mathbf{0}, Diag(\sigma^2_g)) \\
+\mathbf{Q_g} &= Diag(\theta_{1,g}, \dots, \theta_{4,g})
+\end{aligned}
+$$
+
+
+# Estimation
+
+Where $y_{g,t}$ and $X_{g,t}$ contain the necessary data to estimate $\tau_{g,t}$:
+
+- $y_{g,t}$ contains outcomes for
+  - Group treated at $g$
+  - Control group (e.g., $g=\infty$)
+  - For times $t$ and the last pre-treatment period $t' = g-1$
+
+. . . 
+
+- $X_{g,t}$ contains the indicators for the canonical DiD setup for each unit $i$:
+  - Indicator for the treatment group
+  - Indicator for the time period $t$
+  - Interaction ("treated unit" and "period of interest")
+  - $[\mathbb{1}(i \in g)\times \mathbb{1}(t)\quad  \mathbb{1}(i \in g)\quad \mathbb{1}(t)\quad \mathbf{1}]$
+
+## Estimation
+
+
+- Non-centered paramterization [@fruhwirth-schnatterStochasticModelSpecification2010]
+
+$$
+\begin{aligned}
+\tilde{\beta}_{g,t} &= \tilde{\beta}_{g,t-1} + \tilde{w}_{g,t}, \quad \tilde{w}_{g,t} \sim N_4(\mathbf{0}, \mathbf{I})\\
+y_{g,t} &= X_{g,t} \beta_g + X_{g,t} Diag(\sqrt{\theta_{g, 1}}, \dots, \sqrt{\theta_{g,4}}) \tilde \beta_{g,t} + \epsilon_{g,t}, \quad \epsilon_{g,t} \sim N_p(0, Diag(\sigma^2_g))
+\end{aligned}
+$$
+
+- Diffuse Normal, inverse gamma prior for pre-treatment model $\rightarrow$ little bias towards $0$
+
+## Post-treatment model
+
+Tripple Gamma [@cadonnaTripleGammaMdash2020] priors for $\sqrt{\theta_{g,j}}$ and $\beta_{g,j}$^[Exploiting the novel representation in @knausDynamicTripleGamma2023]
+
+:::: {.columns}
+::: {.column width="50%"}
+$$
+\sqrt{\theta}_j\left|\xi_j^2 \sim N\left(0, \xi_j^2\right),\\
+\xi_j^2\right| a^{\xi}, \kappa_j^2 \sim G\left(a^{\xi}, \frac{a^{\xi} \kappa_j^2}{2}\right),\\
+\kappa_j^2 \mid c^{\xi}, \kappa_B^2 \sim G \left(c^{\xi}, \frac{c^{\xi}}{\kappa_B^2}\right)
+$$
+:::
+::: {.column width="50%"}
+$$
+\beta_j\left|\phi_j^2 \sim N\left(0, \phi_j^2\right), \\
+\phi_j^2\right| a^\phi, \lambda_j^2 \sim G\left(a^\phi, \frac{a^\phi \lambda_j^2}{2}\right), \\
+\lambda_j^2 \mid c^\phi, \lambda_B^2 \sim G\left(c^\phi, \frac{c^\phi}{\lambda_B^2}\right)
+$$
+:::
+::::
+
+## Post-treatment model
+
+Global shrinkage ($\lambda_B^2,\ \kappa_B^2$) also as in [@cadonnaTripleGammaMdash2020] s.t. 
+
+- $\frac{\lambda_B^2}{2} \sim F(2a^\lambda, 2c^\lambda)$ and 
+- $\frac{\kappa_B^2}{2} \sim F(2a^\kappa, 2c^\kappa)$
+
+# Does it work?
+
+## DGP: No trend violation, no treatment effect
+
+![](no_effect_tau.png)
+
+## DGP: No trend violation, constant effect
+
+![](const_effect.png)
+
+## DGP: No trend violation, increasing effect
+
+![](inc_effect.png)
+
+## DGP: Trend violation, no effect
+
+![](vio_noeffect.png)
+
+## Correcting trend violations
+
+**Corrected by implied violation based on posterior-median of pre-treatment model** [similar to @rambachanMoreCredibleApproach2023a]
+
+![](vio_noeffect_corrected.png)
+
+## Three periods of effects
+
+![](two_period_eff.png)
+
+## Declining effect with bottom-out
+
+![](smooth_eff.png)
+
+## Next Steps
+
+- Is the trend-violation pre-treatment $\neq 0$?
+  - Moving beyond binary "significance" [@wassersteinMovingWorld052019]
+  - "Region of Pracitcal Equivalence" $\rightarrow$ share of posterior in region
+  - Savage-Dickey Density ratio $\rightarrow$ ratio of posterior/prior mass at $0$ [@wagenmakersBayesianHypothesisTesting2010a]
+- Rethink $\sigma_g$
+  - Stochastic volatilty
+  - $g,\ g=\infty$ specific variance 
+  - Group specific stochastic volatility?
+- Hierarchy across groups
+  - Learn about treatment effect $k$ periods after treatment from other groups
+- Combine parameters to $ATT_g$ or even total $ATT$
+
+## References {.allowpagebreaks}
